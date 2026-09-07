@@ -1,0 +1,33 @@
+# Maven build output
+/target/
+*.class
+
+# File uploads & runtime assets
+/uploads/
+uploads/**
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# IntelliJ IDEA & IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+/bin/
+.settings/
+.project
+.classpath
+
+# Logs
+*.log
+logs/
+
+# Operating System files
+.DS_Store
+Thumbs.db

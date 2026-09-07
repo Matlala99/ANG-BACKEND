@@ -1,5 +1,12 @@
 package com.agc.cms.controller;
 
+import com.agc.cms.dto.AddDiaryEntryRequest;
+import com.agc.cms.security.AuthenticatedUser;
+import com.agc.cms.security.JwtAuthenticationFilter;
+import com.agc.cms.security.SanitizerUtils;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -17,6 +24,10 @@ public class CourtDiaryController {
 
     public CourtDiaryController(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    private AuthenticatedUser getAuthUser(HttpServletRequest request) {
+        return (AuthenticatedUser) request.getAttribute(JwtAuthenticationFilter.AUTH_USER_ATTR);
     }
 
     @GetMapping
@@ -45,24 +56,23 @@ public class CourtDiaryController {
             result.add(map);
         }
 
-        System.out.println("🗓️ [COURT DIARY] Loaded " + result.size() + " scheduled entries from agc_cms database to Angular");
         return ResponseEntity.ok(result);
     }
 
     @PostMapping
-    public ResponseEntity<?> addDiaryEntry(@RequestBody Map<String, Object> body) {
-        String caseIdStr = (String) body.get("case_id");
-        String eventType = (String) body.get("event_type");
-        String eventDate = (String) body.get("event_date");
-        String eventTime = (String) body.get("event_time");
-        String location = (String) body.get("location");
-        String description = (String) body.get("description");
-        Object assignedUserIdObj = body.get("assigned_user_id");
-        Object createdByObj = body.get("created_by");
-
-        if (caseIdStr == null || eventType == null || eventDate == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Case ID, Event Type, and Event Date are required"));
+    public ResponseEntity<?> addDiaryEntry(@Valid @RequestBody AddDiaryEntryRequest req, HttpServletRequest httpRequest) {
+        AuthenticatedUser user = getAuthUser(httpRequest);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
         }
+
+        String caseIdStr = req.getCase_id().trim();
+        String eventType = SanitizerUtils.sanitizeText(req.getEvent_type(), 100);
+        String eventDate = req.getEvent_date();
+        String eventTime = SanitizerUtils.sanitizeText(req.getEvent_time(), 20);
+        String location = SanitizerUtils.sanitizeText(req.getLocation(), 255);
+        String description = SanitizerUtils.sanitizeText(req.getDescription(), 2000);
+        Object assignedUserIdObj = req.getAssigned_user_id();
 
         String[] parts = caseIdStr.split("-");
         String typeStr = parts[0].toLowerCase();
@@ -76,18 +86,22 @@ public class CourtDiaryController {
         };
 
         Integer assignedUserId = assignedUserIdObj instanceof Number ? ((Number) assignedUserIdObj).intValue() : null;
-        int createdBy = createdByObj instanceof Number ? ((Number) createdByObj).intValue() : 1;
 
         jdbcTemplate.update(
             "INSERT INTO court_diary (case_id, case_type, event_type, event_date, event_time, location, description, assigned_user_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            rawID, dbType, eventType, eventDate, eventTime, location, description, assignedUserId, createdBy
+            rawID, dbType, eventType, eventDate, eventTime, location, description, assignedUserId, user.getOfficerID()
         );
 
         return ResponseEntity.ok(Map.of("success", true));
     }
 
     @PostMapping("/{id}/assign")
-    public ResponseEntity<?> assignOfficer(@PathVariable int id, @RequestBody Map<String, Object> body) {
+    public ResponseEntity<?> assignOfficer(@PathVariable int id, @RequestBody Map<String, Object> body, HttpServletRequest httpRequest) {
+        AuthenticatedUser user = getAuthUser(httpRequest);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+        }
+
         Object officerIDObj = body.get("officerID");
         if (officerIDObj == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "Officer ID is required"));
@@ -98,12 +112,18 @@ public class CourtDiaryController {
     }
 
     @PostMapping("/{id}/status")
-    public ResponseEntity<?> updateStatus(@PathVariable int id, @RequestBody Map<String, Object> body) {
+    public ResponseEntity<?> updateStatus(@PathVariable int id, @RequestBody Map<String, Object> body, HttpServletRequest httpRequest) {
+        AuthenticatedUser user = getAuthUser(httpRequest);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+        }
+
         String status = (String) body.get("status");
-        if (status == null) {
+        if (status == null || status.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Status is required"));
         }
-        jdbcTemplate.update("UPDATE court_diary SET status = ? WHERE id = ?", status, id);
+        String cleanStatus = SanitizerUtils.sanitizeText(status, 50);
+        jdbcTemplate.update("UPDATE court_diary SET status = ? WHERE id = ?", cleanStatus, id);
         return ResponseEntity.ok(Map.of("success", true));
     }
 }

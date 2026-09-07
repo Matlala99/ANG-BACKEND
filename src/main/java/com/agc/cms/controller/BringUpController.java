@@ -1,5 +1,9 @@
 package com.agc.cms.controller;
 
+import com.agc.cms.security.AuthenticatedUser;
+import com.agc.cms.security.JwtAuthenticationFilter;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -17,6 +21,10 @@ public class BringUpController {
 
     public BringUpController(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    private AuthenticatedUser getAuthUser(HttpServletRequest request) {
+        return (AuthenticatedUser) request.getAttribute(JwtAuthenticationFilter.AUTH_USER_ATTR);
     }
 
     private boolean toBoolean(Object val) {
@@ -87,28 +95,42 @@ public class BringUpController {
             result.add(map);
         }
 
-        System.out.println("📥 [FETCH BRING-UPS] Loaded " + result.size() + " file bring-up ticklers from agc_cms database");
         return ResponseEntity.ok(result);
     }
 
     @PostMapping("/bringup/{bringupID}/collect")
-    public ResponseEntity<?> collectFile(@PathVariable int bringupID) {
+    public ResponseEntity<?> collectFile(@PathVariable int bringupID, HttpServletRequest request) {
+        AuthenticatedUser user = getAuthUser(request);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+        }
+
         jdbcTemplate.update("UPDATE bringup SET collected = 1 WHERE bringupID = ?", bringupID);
-        System.out.println("📦 [FILE COLLECTED] BringUp ID #" + bringupID + " checked out / collected by Registry");
+        System.out.println("📦 [FILE COLLECTED] BringUp ID #" + bringupID + " checked out by " + user.getUsername());
         return ResponseEntity.ok(Map.of("success", true));
     }
 
     @PostMapping("/bringup/{bringupID}/receive")
-    public ResponseEntity<?> receiveFile(@PathVariable int bringupID) {
+    public ResponseEntity<?> receiveFile(@PathVariable int bringupID, HttpServletRequest request) {
+        AuthenticatedUser user = getAuthUser(request);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+        }
+
         jdbcTemplate.update("UPDATE bringup SET recieved = 1, recieptDate = CURDATE() WHERE bringupID = ?", bringupID);
-        System.out.println("📩 [FILE RECEIVED] BringUp ID #" + bringupID + " received by State Counsel");
+        System.out.println("📩 [FILE RECEIVED] BringUp ID #" + bringupID + " received by " + user.getUsername());
         return ResponseEntity.ok(Map.of("success", true));
     }
 
     @PostMapping("/bringup/{bringupID}/return")
-    public ResponseEntity<?> returnFile(@PathVariable int bringupID) {
+    public ResponseEntity<?> returnFile(@PathVariable int bringupID, HttpServletRequest request) {
+        AuthenticatedUser user = getAuthUser(request);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+        }
+
         jdbcTemplate.update("UPDATE bringup SET broughtBack = 1 WHERE bringupID = ?", bringupID);
-        System.out.println("📤 [FILE RETURNED] BringUp ID #" + bringupID + " returned back to Registry");
+        System.out.println("📤 [FILE RETURNED] BringUp ID #" + bringupID + " returned by " + user.getUsername());
         return ResponseEntity.ok(Map.of("success", true));
     }
 }
