@@ -18,6 +18,10 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -79,6 +83,25 @@ public class CaseController {
                 Integer.class, rawID, dbType, officerID
         );
         return count != null && count > 0;
+    }
+
+    private void ensureDocumentsTableExists() {
+        try {
+            jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS `documents` (
+                  `documentID` INT AUTO_INCREMENT PRIMARY KEY,
+                  `caseID` INT NOT NULL,
+                  `caseType` INT NOT NULL,
+                  `documentClass` INT DEFAULT 1,
+                  `name` VARCHAR(255) NOT NULL,
+                  `size` BIGINT DEFAULT 0,
+                  `type` VARCHAR(100) DEFAULT 'application/pdf',
+                  `uploadDate` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """);
+        } catch (Exception e) {
+            System.err.println("Notice on documents table check: " + e.getMessage());
+        }
     }
 
     @GetMapping
@@ -191,6 +214,25 @@ public class CaseController {
                 verdictMap.put(cType + "-" + cId, desc);
             }
 
+            // Fetch documents mapped by dbType-caseID
+            Map<String, List<Map<String, Object>>> documentsMap = new HashMap<>();
+            try {
+                ensureDocumentsTableExists();
+                List<Map<String, Object>> docs = jdbcTemplate.queryForList("""
+                    SELECT documentID, caseID, caseType, name, size, type, uploadDate 
+                    FROM documents 
+                    ORDER BY documentID DESC
+                """);
+                for (Map<String, Object> doc : docs) {
+                    int cId = ((Number) doc.get("caseID")).intValue();
+                    int cType = ((Number) doc.get("caseType")).intValue();
+                    String key = cType + "-" + cId;
+                    documentsMap.computeIfAbsent(key, k -> new ArrayList<>()).add(doc);
+                }
+            } catch (Exception docEx) {
+                System.err.println("Notice: could not load case documents: " + docEx.getMessage());
+            }
+
             // Build result list
             List<Map<String, Object>> formattedList = new ArrayList<>();
             for (Map<String, Object> r : allRaw) {
@@ -226,9 +268,11 @@ public class CaseController {
 
                 String bringUpDate = bringupMap.get(dbType + "-" + rawID);
                 String verdict = verdictMap.get(dbType + "-" + rawID);
+                List<Map<String, Object>> caseDocs = documentsMap.getOrDefault(dbType + "-" + rawID, Collections.emptyList());
 
                 Map<String, Object> item = new HashMap<>();
                 item.put("id", caseKey);
+                item.put("caseID", caseKey);
                 item.put("rawID", rawID);
                 item.put("fileNumber", r.get("fileNumber"));
                 item.put("caseType", caseType);
@@ -242,6 +286,7 @@ public class CaseController {
                 item.put("lastPaymentDate", r.get("lastPaymentDate"));
                 item.put("bringUpDate", bringUpDate);
                 item.put("verdict", verdict);
+                item.put("documents", caseDocs);
                 item.put("ministryName", r.get("ministryName"));
                 item.put("created_at", r.get("created_at"));
 
@@ -758,7 +803,7 @@ public class CaseController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
         }
 
-        if (file.isEmpty()) {
+        if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "No file uploaded"));
         }
 
@@ -768,29 +813,42 @@ public class CaseController {
         int dbType = getDbTypeCode(caseType);
 
         try {
-            File dir = new File(uploadDir);
-            if (!dir.exists()) {
-                dir.mkdirs();
+            ensureDocumentsTableExists();
+
+            Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
+            if (!Files.exists(uploadPath)) {
+                Files.createDirectories(uploadPath);
             }
 
             String cleanName = SanitizerUtils.sanitizeFilename(file.getOriginalFilename());
             String storedFilename = System.currentTimeMillis() + "-" + Math.round(Math.random() * 1E9) + "-" + cleanName;
-            File dest = new File(dir, storedFilename);
-            file.transferTo(dest);
+            Path targetLocation = uploadPath.resolve(storedFilename);
+            Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
 
             jdbcTemplate.update(
                 "INSERT INTO documents (caseID, caseType, documentClass, name, size, type, uploadDate) VALUES (?, ?, 1, ?, ?, ?, NOW())",
                 rawID, dbType, storedFilename, file.getSize(), file.getContentType()
             );
 
-            jdbcTemplate.update(
-                "INSERT INTO transactions (caseID, caseType, officerID, activityID, dateRecorded, transactionDate) VALUES (?, ?, ?, 10, NOW(), CURDATE())",
-                rawID, dbType, user.getOfficerID()
-            );
+            try {
+                jdbcTemplate.update(
+                    "INSERT INTO transactions (caseID, caseType, officerID, activityID, dateRecorded, transactionDate) VALUES (?, ?, ?, 10, NOW(), CURDATE())",
+                    rawID, dbType, user.getOfficerID()
+                );
+            } catch (Exception txEx) {
+                System.err.println("Notice on transaction recording: " + txEx.getMessage());
+            }
 
-            return ResponseEntity.ok(Map.of("success", true, "name", storedFilename));
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", "Failed to save file securely"));
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "name", storedFilename,
+                "size", file.getSize(),
+                "type", file.getContentType() != null ? file.getContentType() : "application/pdf"
+            ));
+        } catch (Exception e) {
+            System.err.println("Error saving document: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Failed to save file securely: " + e.getMessage()));
         }
     }
 

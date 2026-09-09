@@ -116,24 +116,24 @@ public class DatabaseInitializer implements CommandLineRunner {
                 System.err.println("Notice on law_firms setup: " + e.getMessage());
             }
 
-            // Ensure ministries table has default records
+            // Ensure documents table exists for file uploads and vault attachments
             try {
-                Integer ministryCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ministries", Integer.class);
-                if (ministryCount == null || ministryCount == 0) {
-                    jdbcTemplate.batchUpdate(
-                        "INSERT INTO ministries (name, code, contactPerson, email) VALUES (?, ?, ?, ?)",
-                        List.of(
-                            new Object[]{"Ministry of Defence & Security", "MDS", "Brigadier M. Sebele", "defence@gov.bw"},
-                            new Object[]{"Ministry of Health", "MOH", "Dr. K. Mogapi", "health@gov.bw"},
-                            new Object[]{"Ministry of Finance", "MOF", "P. Letsholo", "finance@gov.bw"},
-                            new Object[]{"Ministry of Transport & Public Works", "MTPW", "Eng. T. Moroka", "transport@gov.bw"},
-                            new Object[]{"Ministry of Minerals & Energy", "MME", "G. Raditladi", "minerals@gov.bw"},
-                            new Object[]{"Ministry of Local Government & Traditional Affairs", "MLGTA", "M. Kgosiemang", "localgov@gov.bw"}
-                        )
-                    );
-                    System.out.println("✅ Successfully seeded Botswana Government Ministries.");
-                }
-            } catch (Exception ignored) {}
+                jdbcTemplate.execute("""
+                    CREATE TABLE IF NOT EXISTS `documents` (
+                      `documentID` INT AUTO_INCREMENT PRIMARY KEY,
+                      `caseID` INT NOT NULL,
+                      `caseType` INT NOT NULL,
+                      `documentClass` INT DEFAULT 1,
+                      `name` VARCHAR(255) NOT NULL,
+                      `size` BIGINT DEFAULT 0,
+                      `type` VARCHAR(100) DEFAULT 'application/pdf',
+                      `uploadDate` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """);
+                System.out.println("✅ [TABLE VERIFICATION] Documents table verified for case file attachments.");
+            } catch (Exception e) {
+                System.err.println("Notice on documents table setup: " + e.getMessage());
+            }
 
         } catch (Exception e) {
             System.err.println("DatabaseInitializer note: " + e.getMessage());

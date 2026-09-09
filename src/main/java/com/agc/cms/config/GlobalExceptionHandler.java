@@ -61,8 +61,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> handleGeneralException(Exception ex) {
         System.err.println("Unhandled backend exception: " + ex.getMessage());
+        ex.printStackTrace();
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
-                "error", "An internal server error occurred. Please contact administrator.",
+                "error", ex.getMessage() != null ? ex.getMessage() : "An internal server error occurred.",
                 "status", HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "timestamp", Instant.now().toString()
         ));

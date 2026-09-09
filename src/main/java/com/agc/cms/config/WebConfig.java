@@ -38,6 +38,6 @@ public class WebConfig implements WebMvcConfigurer {
             uploadDir.mkdirs();
         }
         registry.addResourceHandler("/uploads/**")
-                .addResourceLocations("file:./uploads/", "file:uploads/");
+                .addResourceLocations(uploadDir.toURI().toString(), "file:./uploads/", "file:uploads/");
     }
 }
