@@ -65,6 +65,14 @@ public class AuthController {
         }
     }
 
+    private boolean toBooleanFalseDefault(Object val) {
+        if (val == null) return false;
+        if (val instanceof Boolean b) return b;
+        if (val instanceof Number n) return n.intValue() != 0;
+        String s = String.valueOf(val).trim();
+        return "1".equals(s) || "true".equalsIgnoreCase(s);
+    }
+
     private String getClientIp(HttpServletRequest request) {
         String xfHeader = request.getHeader("X-Forwarded-For");
         if (xfHeader != null && !xfHeader.isEmpty() && !"unknown".equalsIgnoreCase(xfHeader)) {
@@ -80,21 +88,14 @@ public class AuthController {
 
         String username = loginRequest.getUsername().trim();
         String password = loginRequest.getPassword().trim();
-        String botTrap = loginRequest.get_hp_trap();
 
-        // 1. Bot Protection Check (Honeypot Trap)
-        if (botTrap != null && !botTrap.trim().isEmpty()) {
-            System.out.println("🤖 [BOT TRAP TRIGGERED] Automated bot submission rejected for username: " + username);
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", "Bot submission rejected"));
-        }
-
-        // 2. Rate Limiting Check
+        // 1. Rate Limiting Check
         String clientIp = getClientIp(httpRequest);
         String rateLimitKey = clientIp + ":" + username.toLowerCase();
 
         if (!loginRateLimiter.isAllowed(rateLimitKey)) {
             long waitSeconds = loginRateLimiter.getSecondsRemaining(rateLimitKey);
-            System.out.println("⛔ [RATE LIMIT EXCEEDED] Too many attempts for " + username + " from IP " + clientIp);
+            System.out.println("[RATE LIMIT EXCEEDED] Too many attempts for " + username + " from IP " + clientIp);
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .header(HttpHeaders.RETRY_AFTER, String.valueOf(waitSeconds))
                     .body(Map.of(
@@ -104,9 +105,9 @@ public class AuthController {
                     ));
         }
 
-        // 3. Query User from Database
+        // 3. Query User from Database (including supervisor info)
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT officerID, username, password, userType, email, active FROM officer WHERE username = ? LIMIT 1",
+                "SELECT officerID, username, password, userType, email, active, isSupervisor, supervisorID FROM officer WHERE username = ? LIMIT 1",
                 username
         );
 
@@ -121,6 +122,9 @@ public class AuthController {
         String email = (String) officer.get("email");
         String dbPassword = (String) officer.get("password");
         boolean active = toBoolean(officer.get("active"));
+        boolean isSupervisor = toBooleanFalseDefault(officer.get("isSupervisor"));
+        Integer supervisorID = officer.get("supervisorID") != null ? toInt(officer.get("supervisorID")) : null;
+        if (supervisorID != null && supervisorID == 0) supervisorID = null;
 
         if (!active) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Account has been deactivated. Please contact administrator."));
@@ -155,13 +159,13 @@ public class AuthController {
             try {
                 String hashed = BCrypt.hashpw(password, BCrypt.gensalt(12));
                 jdbcTemplate.update("UPDATE officer SET password = ? WHERE officerID = ?", hashed, officerID);
-                System.out.println("🔒 [PASSWORD UPGRADED] Stored fresh BCrypt hash for user '" + username + "'.");
+                System.out.println("[PASSWORD UPGRADED] Stored fresh BCrypt hash for user '" + username + "'.");
             } catch (Exception ignored) {}
         }
 
         if (!isMatch) {
             loginRateLimiter.recordFailedAttempt(rateLimitKey);
-            System.out.println("❌ [AUTH FAILED] Incorrect credentials for user '" + username + "'");
+            System.out.println("[AUTH FAILED] Incorrect credentials for user '" + username + "'");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid username or password"));
         }
 
@@ -181,11 +185,26 @@ public class AuthController {
             fullName = fullName.trim().isEmpty() ? username : fullName.trim();
         }
 
+        // Fetch Supervisor Name if assigned
+        String supervisorName = null;
+        if (supervisorID != null) {
+            try {
+                List<Map<String, Object>> supRows = jdbcTemplate.queryForList(
+                        "SELECT CONCAT(COALESCE(p.firstName, ''), ' ', COALESCE(p.surname, o.username)) as supName " +
+                        "FROM officer o LEFT JOIN person p ON o.officerID = p.personID WHERE o.officerID = ?",
+                        supervisorID
+                );
+                if (!supRows.isEmpty() && supRows.get(0).get("supName") != null) {
+                    supervisorName = ((String) supRows.get(0).get("supName")).trim();
+                }
+            } catch (Exception ignored) {}
+        }
+
         String role = getRoleLabel(userType);
         String resolvedEmail = (email != null && !email.trim().isEmpty()) ? email : username + "@gov.bw";
 
-        // 6. Generate Signed JWT Token
-        String token = jwtTokenProvider.generateToken(officerID, username, resolvedEmail, role, userType);
+        // 6. Generate Signed JWT Token with supervisor context
+        String token = jwtTokenProvider.generateToken(officerID, username, resolvedEmail, role, userType, isSupervisor, supervisorID);
 
         // 7. Update last_login timestamp
         jdbcTemplate.update("UPDATE officer SET last_login = NOW(), active = 1 WHERE officerID = ?", officerID);
@@ -199,15 +218,17 @@ public class AuthController {
         } catch (Exception ignored) {}
 
         // 9. Return Token and Safe User Map (Excluding password)
-        Map<String, Object> safeUser = Map.of(
-                "officerID", officerID,
-                "username", username,
-                "email", resolvedEmail,
-                "role", role,
-                "userType", userType,
-                "fullName", fullName,
-                "lastLogin", Instant.now().toString()
-        );
+        Map<String, Object> safeUser = new java.util.HashMap<>();
+        safeUser.put("officerID", officerID);
+        safeUser.put("username", username);
+        safeUser.put("email", resolvedEmail);
+        safeUser.put("role", role);
+        safeUser.put("userType", userType);
+        safeUser.put("fullName", fullName);
+        safeUser.put("lastLogin", Instant.now().toString());
+        safeUser.put("isSupervisor", isSupervisor);
+        safeUser.put("supervisorID", supervisorID);
+        safeUser.put("supervisorName", supervisorName);
 
         return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -221,7 +242,7 @@ public class AuthController {
         AuthenticatedUser authUser = (AuthenticatedUser) request.getAttribute(JwtAuthenticationFilter.AUTH_USER_ATTR);
         if (authUser != null) {
             jdbcTemplate.update("UPDATE officer SET last_logout = NOW() WHERE officerID = ?", authUser.getOfficerID());
-            System.out.println("🚪 [LOGOUT] Officer ID " + authUser.getOfficerID() + " (" + authUser.getUsername() + ") logged out.");
+            System.out.println("[LOGOUT] Officer ID " + authUser.getOfficerID() + " (" + authUser.getUsername() + ") logged out.");
         }
         return ResponseEntity.ok(Map.of("success", true));
     }

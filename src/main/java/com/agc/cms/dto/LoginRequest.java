@@ -13,9 +13,6 @@ public class LoginRequest {
     @Size(min = 1, max = 255, message = "Password is required")
     private String password;
 
-    // Honeypot field for bot protection (should be empty when submitted by legitimate humans)
-    private String _hp_trap;
-
     public String getUsername() {
         return username;
     }
@@ -30,13 +27,5 @@ public class LoginRequest {
 
     public void setPassword(String password) {
         this.password = password;
-    }
-
-    public String get_hp_trap() {
-        return _hp_trap;
-    }
-
-    public void set_hp_trap(String _hp_trap) {
-        this._hp_trap = _hp_trap;
     }
 }

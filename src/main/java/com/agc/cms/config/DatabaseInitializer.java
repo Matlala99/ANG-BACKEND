@@ -64,7 +64,7 @@ public class DatabaseInitializer implements CommandLineRunner {
                     }
                 }
                 if (migratedCount > 0) {
-                    System.out.println("🔒 [SECURITY HARDENING] Auto-migrated " + migratedCount + " legacy officer passwords to BCrypt hashes.");
+                    System.out.println("[SECURITY HARDENING] Auto-migrated " + migratedCount + " legacy officer passwords to BCrypt hashes.");
                 }
             } catch (Exception e) {
                 System.err.println("Password migration check notice: " + e.getMessage());
@@ -74,7 +74,7 @@ public class DatabaseInitializer implements CommandLineRunner {
             try {
                 int activated = jdbcTemplate.update("UPDATE officer SET active = 1 WHERE active IS NULL OR active = 0");
                 if (activated > 0) {
-                    System.out.println("✅ [ACCOUNT STATUS] Re-activated " + activated + " officer account(s).");
+                    System.out.println("[ACCOUNT STATUS] Re-activated " + activated + " officer account(s).");
                 }
             } catch (Exception ignored) {}
 
@@ -110,7 +110,7 @@ public class DatabaseInitializer implements CommandLineRunner {
                             new Object[]{"Dingake Law Partners", "Key Dingake", "+267 393 4511", "partners@dingakelaw.co.bw", "Fairgrounds Office Park", "Gaborone"}
                         )
                     );
-                    System.out.println("✅ Successfully seeded 8 major Botswana law practice firms.");
+                    System.out.println("[SUCCESS] Successfully seeded 8 major Botswana law practice firms.");
                 }
             } catch (Exception e) {
                 System.err.println("Notice on law_firms setup: " + e.getMessage());
@@ -130,13 +130,59 @@ public class DatabaseInitializer implements CommandLineRunner {
                       `uploadDate` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """);
-                System.out.println("✅ [TABLE VERIFICATION] Documents table verified for case file attachments.");
+                System.out.println("[TABLE VERIFICATION] Documents table verified for case file attachments.");
             } catch (Exception e) {
                 System.err.println("Notice on documents table setup: " + e.getMessage());
             }
 
+            // Supervisory Hierarchy & Review Migrations (Compatible with all MySQL/MariaDB versions)
+            try {
+                // 1. Officer table supervisory columns
+                addColumnIfNotExists("officer", "isSupervisor", "TINYINT(1) DEFAULT 0");
+                addColumnIfNotExists("officer", "supervisorID", "INT NULL");
+
+                // 2. Case work logs supervisory review columns
+                addColumnIfNotExists("cld_case_work_logs", "supervisorReviewed", "TINYINT(1) DEFAULT 0");
+                addColumnIfNotExists("cld_case_work_logs", "supervisorReviewDate", "TIMESTAMP NULL DEFAULT NULL");
+                addColumnIfNotExists("cld_case_work_logs", "supervisorID", "INT NULL");
+                addColumnIfNotExists("cld_case_work_logs", "supervisorName", "VARCHAR(150) NULL");
+                addColumnIfNotExists("cld_case_work_logs", "supervisorNotes", "TEXT NULL");
+                addColumnIfNotExists("cld_case_work_logs", "supervisorStatus", "VARCHAR(50) DEFAULT 'Pending Review'");
+
+                // 3. Seed Supervising Counsel: designate senior counsel 'pmusindo' (Philemon Musindo) as a Supervising Counsel
+                List<Map<String, Object>> pmusindoList = jdbcTemplate.queryForList("SELECT officerID FROM officer WHERE LOWER(username) = 'pmusindo' AND userType = 7");
+                if (!pmusindoList.isEmpty()) {
+                    int supervisorId = ((Number) pmusindoList.get(0).get("officerID")).intValue();
+                    jdbcTemplate.update("UPDATE officer SET isSupervisor = 1 WHERE officerID = ?", supervisorId);
+
+                    // Assign other State Counsels who don't have a supervisor to report to pmusindo
+                    jdbcTemplate.update("UPDATE officer SET supervisorID = ? WHERE userType = 7 AND officerID != ? AND (supervisorID IS NULL OR supervisorID = 0)", supervisorId, supervisorId);
+                    System.out.println("[SUPERVISORY HIERARCHY] Senior Counsel 'pmusindo' (ID: " + supervisorId + ") designated as Supervising State Counsel.");
+                }
+            } catch (Exception e) {
+                System.err.println("Notice on supervisory hierarchy setup: " + e.getMessage());
+            }
+
         } catch (Exception e) {
             System.err.println("DatabaseInitializer note: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Safely add a column to a table if it does not exist across all MySQL / MariaDB versions.
+     */
+    private void addColumnIfNotExists(String tableName, String columnName, String columnDefinition) {
+        try {
+            Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                Integer.class, tableName, columnName
+            );
+            if (count == null || count == 0) {
+                jdbcTemplate.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition);
+                System.out.println("[DB SCHEMA] Added column " + columnName + " to " + tableName);
+            }
+        } catch (Exception e) {
+            System.err.println("Could not add column " + columnName + " to " + tableName + ": " + e.getMessage());
         }
     }
 }

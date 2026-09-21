@@ -26,7 +26,7 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
         String uri = request.getRequestURI();
         String queryString = request.getQueryString();
 
-        System.out.println(String.format("[%s] 🚀 [REQUEST] %s %s%s",
+        System.out.println(String.format("[%s] [REQUEST] %s %s%s",
                 timestamp, method, uri, (queryString != null ? "?" + queryString : "")));
 
         try {
@@ -36,9 +36,9 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
             int status = response.getStatus();
             String endTimestamp = LocalDateTime.now().format(FORMATTER);
 
-            String statusIcon = status >= 200 && status < 300 ? "✅" : "⚠️";
-            System.out.println(String.format("[%s] %s [RESPONSE] %s %s | Status: %d | Time: %d ms",
-                    endTimestamp, statusIcon, method, uri, status, duration));
+            String statusLabel = status >= 200 && status < 300 ? "OK" : "WARN";
+            System.out.println(String.format("[%s] [%s] [RESPONSE] %s %s | Status: %d | Time: %d ms",
+                    endTimestamp, statusLabel, method, uri, status, duration));
         }
     }
 }

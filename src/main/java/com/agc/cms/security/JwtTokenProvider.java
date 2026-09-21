@@ -44,18 +44,27 @@ public class JwtTokenProvider {
     }
 
     public String generateToken(int officerID, String username, String email, String role, int userType) {
+        return generateToken(officerID, username, email, role, userType, false, null);
+    }
+
+    public String generateToken(int officerID, String username, String email, String role, int userType, boolean isSupervisor, Integer supervisorID) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + expirationMs);
 
+        java.util.Map<String, Object> claims = new java.util.HashMap<>();
+        claims.put("officerID", officerID);
+        claims.put("username", username);
+        claims.put("email", email != null ? email : "");
+        claims.put("role", role != null ? role : "Officer");
+        claims.put("userType", userType);
+        claims.put("isSupervisor", isSupervisor);
+        if (supervisorID != null) {
+            claims.put("supervisorID", supervisorID);
+        }
+
         return Jwts.builder()
                 .subject(String.valueOf(officerID))
-                .claims(Map.of(
-                        "officerID", officerID,
-                        "username", username,
-                        "email", email != null ? email : "",
-                        "role", role != null ? role : "Officer",
-                        "userType", userType
-                ))
+                .claims(claims)
                 .issuedAt(now)
                 .expiration(expiryDate)
                 .signWith(secretKey)
@@ -75,8 +84,11 @@ public class JwtTokenProvider {
             String email = claims.get("email", String.class);
             String role = claims.get("role", String.class);
             int userType = ((Number) claims.get("userType")).intValue();
+            boolean isSupervisor = Boolean.TRUE.equals(claims.get("isSupervisor", Boolean.class));
+            Number supIdNum = claims.get("supervisorID", Number.class);
+            Integer supervisorID = supIdNum != null ? supIdNum.intValue() : null;
 
-            return new AuthenticatedUser(officerID, username, email, role, userType);
+            return new AuthenticatedUser(officerID, username, email, role, userType, isSupervisor, supervisorID);
         } catch (Exception e) {
             return null;
         }

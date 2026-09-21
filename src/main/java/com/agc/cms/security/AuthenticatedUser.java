@@ -6,13 +6,21 @@ public class AuthenticatedUser {
     private final String email;
     private final String role;
     private final int userType;
+    private final boolean isSupervisor;
+    private final Integer supervisorID;
 
-    public AuthenticatedUser(int officerID, String username, String email, String role, int userType) {
+    public AuthenticatedUser(int officerID, String username, String email, String role, int userType, boolean isSupervisor, Integer supervisorID) {
         this.officerID = officerID;
         this.username = username;
         this.email = email;
         this.role = role;
         this.userType = userType;
+        this.isSupervisor = isSupervisor;
+        this.supervisorID = supervisorID;
+    }
+
+    public AuthenticatedUser(int officerID, String username, String email, String role, int userType) {
+        this(officerID, username, email, role, userType, false, null);
     }
 
     public int getOfficerID() {
@@ -53,5 +61,13 @@ public class AuthenticatedUser {
 
     public boolean isStateCounsel() {
         return userType == 7;
+    }
+
+    public boolean isSupervisor() {
+        return isSupervisor;
+    }
+
+    public Integer getSupervisorID() {
+        return supervisorID;
     }
 }

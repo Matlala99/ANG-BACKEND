@@ -78,9 +78,14 @@ public class OfficerController {
     public ResponseEntity<?> getOfficers() {
         String query = """
             SELECT o.officerID, o.username, o.userType, o.email, o.last_login, o.last_logout, o.active,
-                   p.firstName, p.surname, p.phone, p.idNumber, p.gender
+                   o.isSupervisor, o.supervisorID,
+                   p.firstName, p.surname, p.phone, p.idNumber, p.gender,
+                   s_p.firstName as supFirstName, s_p.surname as supSurname, s_o.username as supUsername,
+                   (SELECT COUNT(*) FROM officer sub WHERE sub.supervisorID = o.officerID AND sub.active = 1) as supervisedCounselsCount
             FROM officer o
             LEFT JOIN person p ON o.officerID = p.personID
+            LEFT JOIN officer s_o ON o.supervisorID = s_o.officerID
+            LEFT JOIN person s_p ON s_o.officerID = s_p.personID
             ORDER BY o.officerID ASC
         """;
 
@@ -98,6 +103,20 @@ public class OfficerController {
             String idNumber = (String) r.get("idNumber");
             String gender = (String) r.get("gender");
             boolean active = toBoolean(r.get("active"));
+            boolean isSupervisor = toBoolean(r.get("isSupervisor"));
+            Integer supervisorID = r.get("supervisorID") != null ? toInt(r.get("supervisorID")) : null;
+            if (supervisorID != null && supervisorID == 0) supervisorID = null;
+
+            String supFirstName = (String) r.get("supFirstName");
+            String supSurname = (String) r.get("supSurname");
+            String supUsername = (String) r.get("supUsername");
+            String supervisorName = null;
+            if (supervisorID != null) {
+                supervisorName = ((supFirstName != null ? supFirstName : "") + " " + (supSurname != null ? supSurname : "")).trim();
+                if (supervisorName.isEmpty()) supervisorName = supUsername != null ? supUsername : ("Supervisor #" + supervisorID);
+            }
+
+            int supervisedCounselsCount = toInt(r.get("supervisedCounselsCount"));
 
             String fullName = (fName != null ? fName : "") + " " + (sName != null ? sName : "");
             fullName = fullName.trim().isEmpty() ? username : fullName.trim();
@@ -117,6 +136,10 @@ public class OfficerController {
             map.put("active", active);
             map.put("lastLogin", r.get("last_login"));
             map.put("lastLogout", r.get("last_logout"));
+            map.put("isSupervisor", isSupervisor);
+            map.put("supervisorID", supervisorID);
+            map.put("supervisorName", supervisorName);
+            map.put("supervisedCounselsCount", supervisedCounselsCount);
             result.add(map);
         }
 
@@ -154,6 +177,41 @@ public class OfficerController {
         return ResponseEntity.ok(result);
     }
 
+    @GetMapping("/supervisors")
+    public ResponseEntity<?> getSupervisors() {
+        String query = """
+            SELECT o.officerID, o.username, o.userType, p.firstName, p.surname,
+                   (SELECT COUNT(*) FROM officer sub WHERE sub.supervisorID = o.officerID AND sub.active = 1) as supervisedCount
+            FROM officer o
+            LEFT JOIN person p ON o.officerID = p.personID
+            WHERE o.isSupervisor = 1 AND o.active = 1
+            ORDER BY p.firstName ASC, o.username ASC
+        """;
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(query);
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (Map<String, Object> r : rows) {
+            int officerID = toInt(r.get("officerID"));
+            String username = (String) r.get("username");
+            String fName = (String) r.get("firstName");
+            String sName = (String) r.get("surname");
+
+            String fullName = (fName != null ? fName : "") + " " + (sName != null ? sName : "");
+            fullName = fullName.trim().isEmpty() ? username : fullName.trim();
+
+            Map<String, Object> map = new HashMap<>();
+            map.put("officerID", officerID);
+            map.put("username", username);
+            map.put("fullName", fullName);
+            map.put("userType", toInt(r.get("userType")));
+            map.put("supervisedCount", toInt(r.get("supervisedCount")));
+            result.add(map);
+        }
+
+        return ResponseEntity.ok(result);
+    }
+
     @PostMapping("/officers")
     @Transactional
     public ResponseEntity<?> createOfficer(@RequestBody Map<String, Object> payload) {
@@ -165,6 +223,9 @@ public class OfficerController {
         String phone = (String) payload.get("phone");
         String idNumber = (String) payload.get("idNumber");
         String gender = (String) payload.get("gender");
+        boolean isSupervisor = toBoolean(payload.get("isSupervisor"));
+        Integer supervisorID = payload.get("supervisorID") != null ? toInt(payload.get("supervisorID")) : null;
+        if (supervisorID != null && supervisorID == 0) supervisorID = null;
 
         if (username == null || username.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Username is required"));
@@ -224,8 +285,8 @@ public class OfficerController {
 
         // 3. Create Officer credential record
         jdbcTemplate.update(
-            "INSERT INTO officer (officerID, username, password, userType, email, active, created_at) VALUES (?, ?, ?, ?, ?, 1, NOW())",
-            personID, username, hashedPassword, userType, finalEmail
+            "INSERT INTO officer (officerID, username, password, userType, email, active, created_at, isSupervisor, supervisorID) VALUES (?, ?, ?, ?, ?, 1, NOW(), ?, ?)",
+            personID, username, hashedPassword, userType, finalEmail, isSupervisor ? 1 : 0, supervisorID
         );
 
         // 4. Log transaction
@@ -240,7 +301,9 @@ public class OfficerController {
             "message", "Officer successfully registered",
             "officerID", personID,
             "username", username,
-            "role", getRoleLabel(userType)
+            "role", getRoleLabel(userType),
+            "isSupervisor", isSupervisor,
+            "supervisorID", supervisorID != null ? supervisorID : 0
         ));
     }
 
@@ -268,6 +331,66 @@ public class OfficerController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Officer not found"));
         }
         return ResponseEntity.ok(Map.of("success", true, "userType", userType, "role", getRoleLabel(userType)));
+    }
+
+    @PutMapping("/officers/{id}/supervisor")
+    public ResponseEntity<?> assignSupervisor(@PathVariable("id") int officerID, @RequestBody Map<String, Object> payload) {
+        Integer supervisorID = payload.get("supervisorID") != null ? toInt(payload.get("supervisorID")) : null;
+        if (supervisorID != null && supervisorID == 0) {
+            supervisorID = null;
+        }
+
+        // Prevent self-supervision
+        if (supervisorID != null && supervisorID == officerID) {
+            return ResponseEntity.badRequest().body(Map.of("error", "An officer cannot be their own supervisor"));
+        }
+
+        int updated = jdbcTemplate.update(
+            "UPDATE officer SET supervisorID = ? WHERE officerID = ?",
+            supervisorID, officerID
+        );
+        if (updated == 0) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Officer not found"));
+        }
+
+        // Fetch supervisor full name
+        String supervisorName = null;
+        if (supervisorID != null) {
+            List<Map<String, Object>> supRows = jdbcTemplate.queryForList(
+                "SELECT CONCAT(COALESCE(p.firstName, ''), ' ', COALESCE(p.surname, o.username)) as supName " +
+                "FROM officer o LEFT JOIN person p ON o.officerID = p.personID WHERE o.officerID = ?",
+                supervisorID
+            );
+            if (!supRows.isEmpty() && supRows.get(0).get("supName") != null) {
+                supervisorName = ((String) supRows.get(0).get("supName")).trim();
+            }
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "officerID", officerID,
+            "supervisorID", supervisorID != null ? supervisorID : 0,
+            "supervisorName", supervisorName != null ? supervisorName : "None"
+        ));
+    }
+
+    @PutMapping("/officers/{id}/supervisor-role")
+    public ResponseEntity<?> toggleSupervisorRole(@PathVariable("id") int officerID, @RequestBody Map<String, Object> payload) {
+        boolean isSupervisor = toBoolean(payload.get("isSupervisor"));
+        int updated = jdbcTemplate.update(
+            "UPDATE officer SET isSupervisor = ? WHERE officerID = ?",
+            isSupervisor ? 1 : 0, officerID
+        );
+        if (updated == 0) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Officer not found"));
+        }
+
+        // If demoted from supervisor, optionally detach subordinate counsels or keep
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "officerID", officerID,
+            "isSupervisor", isSupervisor
+        ));
     }
 
     @PostMapping("/officers/{id}/reset-password")
@@ -310,6 +433,17 @@ public class OfficerController {
         if (payload.containsKey("userType") || payload.containsKey("role")) {
             int userType = getRoleUserType(payload.get("userType") != null ? payload.get("userType") : payload.get("role"));
             jdbcTemplate.update("UPDATE officer SET userType = ? WHERE officerID = ?", userType, officerID);
+        }
+
+        if (payload.containsKey("isSupervisor")) {
+            boolean isSupervisor = toBoolean(payload.get("isSupervisor"));
+            jdbcTemplate.update("UPDATE officer SET isSupervisor = ? WHERE officerID = ?", isSupervisor ? 1 : 0, officerID);
+        }
+
+        if (payload.containsKey("supervisorID")) {
+            Integer supervisorID = payload.get("supervisorID") != null ? toInt(payload.get("supervisorID")) : null;
+            if (supervisorID != null && supervisorID == 0) supervisorID = null;
+            jdbcTemplate.update("UPDATE officer SET supervisorID = ? WHERE officerID = ?", supervisorID, officerID);
         }
 
         return ResponseEntity.ok(Map.of("success", true, "message", "Officer profile updated"));

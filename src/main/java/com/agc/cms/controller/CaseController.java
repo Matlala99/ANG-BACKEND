@@ -233,6 +233,24 @@ public class CaseController {
                 System.err.println("Notice: could not load case documents: " + docEx.getMessage());
             }
 
+            // Fetch activities/worklogs mapped by caseID
+            Map<String, List<Map<String, Object>>> activitiesMap = new HashMap<>();
+            try {
+                List<Map<String, Object>> logs = jdbcTemplate.queryForList("""
+                    SELECT logID, caseID, type, description, officerName, officerID,
+                           supervisorReviewed, supervisorReviewDate, supervisorID,
+                           supervisorName, supervisorNotes, supervisorStatus, dateRecorded as date
+                    FROM cld_case_work_logs
+                    ORDER BY dateRecorded DESC
+                """);
+                for (Map<String, Object> log : logs) {
+                    String cId = String.valueOf(log.get("caseID"));
+                    activitiesMap.computeIfAbsent(cId, k -> new ArrayList<>()).add(log);
+                }
+            } catch (Exception logEx) {
+                System.err.println("Notice: could not load work logs: " + logEx.getMessage());
+            }
+
             // Build result list
             List<Map<String, Object>> formattedList = new ArrayList<>();
             for (Map<String, Object> r : allRaw) {
@@ -269,6 +287,7 @@ public class CaseController {
                 String bringUpDate = bringupMap.get(dbType + "-" + rawID);
                 String verdict = verdictMap.get(dbType + "-" + rawID);
                 List<Map<String, Object>> caseDocs = documentsMap.getOrDefault(dbType + "-" + rawID, Collections.emptyList());
+                List<Map<String, Object>> caseActs = activitiesMap.getOrDefault(caseKey, activitiesMap.getOrDefault(String.valueOf(rawID), Collections.emptyList()));
 
                 Map<String, Object> item = new HashMap<>();
                 item.put("id", caseKey);
@@ -287,6 +306,7 @@ public class CaseController {
                 item.put("bringUpDate", bringUpDate);
                 item.put("verdict", verdict);
                 item.put("documents", caseDocs);
+                item.put("activities", caseActs);
                 item.put("ministryName", r.get("ministryName"));
                 item.put("created_at", r.get("created_at"));
 
@@ -450,7 +470,7 @@ public class CaseController {
             List<Map<String, Object>> allocatingOfficers = jdbcTemplate.queryForList(
                 "SELECT officerID FROM officer WHERE userType = 4 AND active = 1"
             );
-            String allocMsg = String.format("📁 New Case Registered: %s matter #%s (%s) received and ready for counsel allocation.", caseType, finFileNo, title);
+            String allocMsg = String.format("New Case Registered: %s matter #%s (%s) received and ready for counsel allocation.", caseType, finFileNo, title);
             for (Map<String, Object> allocOff : allocatingOfficers) {
                 int allocID = ((Number) allocOff.get("officerID")).intValue();
                 jdbcTemplate.update(

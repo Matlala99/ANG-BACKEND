@@ -39,6 +39,8 @@ CREATE TABLE `officer` (
   `password` VARCHAR(255) NOT NULL,
   `userType` INT NOT NULL,
   `email` VARCHAR(150) NULL,
+  `isSupervisor` TINYINT(1) DEFAULT 0,
+  `supervisorID` INT NULL,
   `active` TINYINT(1) DEFAULT 1,
   `last_login` TIMESTAMP NULL DEFAULT NULL,
   `last_logout` TIMESTAMP NULL DEFAULT NULL,
@@ -198,6 +200,12 @@ CREATE TABLE `cld_case_work_logs` (
   `description` TEXT NOT NULL,
   `officerName` VARCHAR(150) NOT NULL,
   `officerID` INT NOT NULL,
+  `supervisorReviewed` TINYINT(1) DEFAULT 0,
+  `supervisorReviewDate` TIMESTAMP NULL DEFAULT NULL,
+  `supervisorID` INT NULL,
+  `supervisorName` VARCHAR(150) NULL,
+  `supervisorNotes` TEXT NULL,
+  `supervisorStatus` VARCHAR(50) DEFAULT 'Pending Review',
   `dateRecorded` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -512,10 +520,10 @@ INSERT INTO `writs_of_execution` (`writ_id`, `summon_id`, `assigned_by`, `assign
 
 -- 17. Notifications
 INSERT INTO `notifications` (`user_id`, `message`, `case_id`, `is_read`) VALUES
-(3, '📜 NEW SUMMONS ASSIGNED. Case: #1, Defendant: Kalahari Construction Managing Director', '1', 0),
-(5, '⚖️ Writ of execution for case #2 has been recorded by Sheriff.', '2', 0),
-(5, '📂 Matter CLD/CLM/2025/003 has been allocated to you by Allocating Officer.', '3', 0),
-(1, '⚠️ Case allocation acknowledged by Counselor Philemon Musindo.', '1', 1);
+(3, 'NEW SUMMONS ASSIGNED. Case: #1, Defendant: Kalahari Construction Managing Director', '1', 0),
+(5, 'Writ of execution for case #2 has been recorded by Sheriff.', '2', 0),
+(5, 'Matter CLD/CLM/2025/003 has been allocated to you by Allocating Officer.', '3', 0),
+(1, 'Case allocation acknowledged by Counselor Philemon Musindo.', '1', 1);
 
 -- 18. Claims Library Research Articles
 INSERT INTO `articles` (`title`, `content`, `author`, `article_type`) VALUES

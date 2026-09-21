@@ -106,7 +106,7 @@ public class BringUpController {
         }
 
         jdbcTemplate.update("UPDATE bringup SET collected = 1 WHERE bringupID = ?", bringupID);
-        System.out.println("📦 [FILE COLLECTED] BringUp ID #" + bringupID + " checked out by " + user.getUsername());
+        System.out.println("[FILE COLLECTED] BringUp ID #" + bringupID + " checked out by " + user.getUsername());
         return ResponseEntity.ok(Map.of("success", true));
     }
 
@@ -118,7 +118,7 @@ public class BringUpController {
         }
 
         jdbcTemplate.update("UPDATE bringup SET recieved = 1, recieptDate = CURDATE() WHERE bringupID = ?", bringupID);
-        System.out.println("📩 [FILE RECEIVED] BringUp ID #" + bringupID + " received by " + user.getUsername());
+        System.out.println("[FILE RECEIVED] BringUp ID #" + bringupID + " received by " + user.getUsername());
         return ResponseEntity.ok(Map.of("success", true));
     }
 
@@ -130,7 +130,7 @@ public class BringUpController {
         }
 
         jdbcTemplate.update("UPDATE bringup SET broughtBack = 1 WHERE bringupID = ?", bringupID);
-        System.out.println("📤 [FILE RETURNED] BringUp ID #" + bringupID + " returned by " + user.getUsername());
+        System.out.println("[FILE RETURNED] BringUp ID #" + bringupID + " returned by " + user.getUsername());
         return ResponseEntity.ok(Map.of("success", true));
     }
 }

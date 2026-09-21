@@ -152,7 +152,7 @@ public class SheriffController {
                 caseId, caseType, user.getOfficerID()
         );
 
-        String msg = "📜 Summons for case #" + caseId + " has been served by Sheriff " + user.getUsername() + ".";
+        String msg = "Summons for case #" + caseId + " has been served by Sheriff " + user.getUsername() + ".";
         jdbcTemplate.update(
                 "INSERT INTO notifications (user_id, message, case_id) VALUES (?, ?, ?)",
                 assignedBy, msg, String.valueOf(caseId)
@@ -198,7 +198,7 @@ public class SheriffController {
                 caseId, caseType, user.getOfficerID()
         );
 
-        String msg = "⚖️ Writ of execution for case #" + caseId + " has been executed by Sheriff " + user.getUsername() + ".";
+        String msg = "Writ of execution for case #" + caseId + " has been executed by Sheriff " + user.getUsername() + ".";
         jdbcTemplate.update(
                 "INSERT INTO notifications (user_id, message, case_id) VALUES (?, ?, ?)",
                 assignedBy, msg, String.valueOf(caseId)
