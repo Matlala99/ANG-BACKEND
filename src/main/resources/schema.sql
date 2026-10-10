@@ -4,10 +4,6 @@
 -- Database: agc_cms
 -- Target Engines: MySQL 8.x / MariaDB / Spring Boot 3.x / Express.js
 -- ====================================================================
-
-CREATE DATABASE IF NOT EXISTS `agc_cms` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE `agc_cms`;
-
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- --------------------------------------------------------------------
