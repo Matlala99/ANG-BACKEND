@@ -29,9 +29,8 @@ public class OfficerController {
     private String getRoleLabel(int userType) {
         return switch (userType) {
             case 1 -> "Administrator";
-            case 2 -> "Registry Records";
+            case 2, 4 -> "Registry Records";
             case 3 -> "Sheriff";
-            case 4 -> "Allocating Officer";
             case 7 -> "State Counsel";
             default -> "Officer";
         };
@@ -47,9 +46,8 @@ public class OfficerController {
 
         return switch (s.toLowerCase()) {
             case "administrator", "admin" -> 1;
-            case "registry records", "registry" -> 2;
+            case "registry records", "registry", "allocating officer", "allocating" -> 2;
             case "sheriff" -> 3;
-            case "allocating officer", "allocating" -> 4;
             case "state counsel", "counsel" -> 7;
             default -> 7;
         };

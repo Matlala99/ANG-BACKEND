@@ -465,10 +465,10 @@ public class CaseController {
             );
         }
 
-        // 6. Notify Allocating Officers
+        // 6. Notify Registry Records / Allocation Desk Officers
         try {
             List<Map<String, Object>> allocatingOfficers = jdbcTemplate.queryForList(
-                "SELECT officerID FROM officer WHERE userType = 4 AND active = 1"
+                "SELECT officerID FROM officer WHERE userType IN (2, 4) AND active = 1"
             );
             String allocMsg = String.format("New Case Registered: %s matter #%s (%s) received and ready for counsel allocation.", caseType, finFileNo, title);
             for (Map<String, Object> allocOff : allocatingOfficers) {
@@ -540,9 +540,9 @@ public class CaseController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
         }
 
-        // Authorization: Only Allocating Officer (4) or Admin (1) can allocate cases
-        if (!user.isAllocatingOfficer() && !user.isAdmin()) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Only Allocating Officers and Administrators can allocate matters"));
+        // Authorization: Registry Records (2), Admin (1), or Allocating Officer (4) can allocate cases
+        if (!user.isRegistry() && !user.isAdmin() && !user.isAllocatingOfficer()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Only Registry Records and Administrators can allocate matters"));
         }
 
         String[] parts = id.split("-");
@@ -652,8 +652,8 @@ public class CaseController {
         int rawID = parts.length > 1 ? Integer.parseInt(parts[1]) : Integer.parseInt(parts[0]);
         int dbType = getDbTypeCode(caseType);
 
-        // Authorization check: Assigned Counsel, Allocating Officer, or Admin
-        if (!user.isAdmin() && !user.isAllocatingOfficer() && !isCounselAllocated(user.getOfficerID(), rawID, dbType)) {
+        // Authorization check: Assigned Counsel, Registry Records, or Admin
+        if (!user.isAdmin() && !user.isRegistry() && !user.isAllocatingOfficer() && !isCounselAllocated(user.getOfficerID(), rawID, dbType)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "You do not have permission to conclude this matter"));
         }
 

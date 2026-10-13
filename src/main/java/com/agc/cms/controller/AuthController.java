@@ -38,9 +38,8 @@ public class AuthController {
     private String getRoleLabel(int userType) {
         return switch (userType) {
             case 1 -> "Administrator";
-            case 2 -> "Registry Records";
+            case 2, 4 -> "Registry Records";
             case 3 -> "Sheriff";
-            case 4 -> "Allocating Officer";
             case 7 -> "State Counsel";
             default -> "Officer";
         };

@@ -48,7 +48,7 @@ public class AuthenticatedUser {
     }
 
     public boolean isRegistry() {
-        return userType == 2;
+        return userType == 2 || userType == 4;
     }
 
     public boolean isSheriff() {
@@ -56,7 +56,7 @@ public class AuthenticatedUser {
     }
 
     public boolean isAllocatingOfficer() {
-        return userType == 4;
+        return isRegistry();
     }
 
     public boolean isStateCounsel() {
