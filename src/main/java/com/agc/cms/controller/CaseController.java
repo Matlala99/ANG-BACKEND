@@ -817,13 +817,29 @@ public class CaseController {
     }
 
     @PostMapping("/{id}/documents")
-    public ResponseEntity<?> uploadDocument(@PathVariable String id, @RequestParam("file") MultipartFile file, HttpServletRequest httpRequest) {
+    public ResponseEntity<?> uploadDocument(
+        @PathVariable String id,
+        @RequestParam(value = "file", required = false) MultipartFile singleFile,
+        @RequestParam(value = "files", required = false) MultipartFile[] multipleFiles,
+        HttpServletRequest httpRequest) {
         AuthenticatedUser user = getAuthUser(httpRequest);
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
         }
 
-        if (file == null || file.isEmpty()) {
+        List<MultipartFile> filesToUpload = new ArrayList<>();
+        if (multipleFiles != null) {
+            for (MultipartFile f : multipleFiles) {
+                if (f != null && !f.isEmpty()) {
+                    filesToUpload.add(f);
+                }
+            }
+        }
+        if (singleFile != null && !singleFile.isEmpty() && !filesToUpload.contains(singleFile)) {
+            filesToUpload.add(singleFile);
+        }
+
+        if (filesToUpload.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "No file uploaded"));
         }
 
@@ -840,15 +856,25 @@ public class CaseController {
                 Files.createDirectories(uploadPath);
             }
 
-            String cleanName = SanitizerUtils.sanitizeFilename(file.getOriginalFilename());
-            String storedFilename = System.currentTimeMillis() + "-" + Math.round(Math.random() * 1E9) + "-" + cleanName;
-            Path targetLocation = uploadPath.resolve(storedFilename);
-            Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
+            List<Map<String, Object>> savedResults = new ArrayList<>();
 
-            jdbcTemplate.update(
-                "INSERT INTO documents (caseID, caseType, documentClass, name, size, type, uploadDate) VALUES (?, ?, 1, ?, ?, ?, NOW())",
-                rawID, dbType, storedFilename, file.getSize(), file.getContentType()
-            );
+            for (MultipartFile file : filesToUpload) {
+                String cleanName = SanitizerUtils.sanitizeFilename(file.getOriginalFilename());
+                String storedFilename = System.currentTimeMillis() + "-" + Math.round(Math.random() * 1E9) + "-" + cleanName;
+                Path targetLocation = uploadPath.resolve(storedFilename);
+                Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
+
+                jdbcTemplate.update(
+                    "INSERT INTO documents (caseID, caseType, documentClass, name, size, type, uploadDate) VALUES (?, ?, 1, ?, ?, ?, NOW())",
+                    rawID, dbType, storedFilename, file.getSize(), file.getContentType()
+                );
+
+                savedResults.add(Map.of(
+                    "name", storedFilename,
+                    "size", file.getSize(),
+                    "type", file.getContentType() != null ? file.getContentType() : "application/pdf"
+                ));
+            }
 
             try {
                 jdbcTemplate.update(
@@ -861,9 +887,11 @@ public class CaseController {
 
             return ResponseEntity.ok(Map.of(
                 "success", true,
-                "name", storedFilename,
-                "size", file.getSize(),
-                "type", file.getContentType() != null ? file.getContentType() : "application/pdf"
+                "count", savedResults.size(),
+                "documents", savedResults,
+                "name", savedResults.get(0).get("name"),
+                "size", savedResults.get(0).get("size"),
+                "type", savedResults.get(0).get("type")
             ));
         } catch (Exception e) {
             System.err.println("Error saving document: " + e.getMessage());
