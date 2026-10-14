@@ -636,6 +636,35 @@ public class CaseController {
             rawID, dbType, user.getOfficerID(), bringUpDate
         );
 
+        // Forward bring-up to Incoming-Mail Register
+        new Thread(() -> {
+            try {
+                String payload = String.format(
+                    "{\"reference_no\":\"%s\",\"case_title\":\"Docket #%s\",\"case_type\":\"%s\",\"bring_up_date\":\"%s\",\"officer_name\":\"%s\",\"action_reason\":\"Court Proceeding / Hearing Bring-Up (CMS)\",\"priority\":\"Normal\",\"status\":\"Pending Pick-up\",\"notes\":\"Scheduled from CMS by %s\"}",
+                    id, id, caseType.toUpperCase(), bringUpDate, user.getUsername(), user.getUsername()
+                );
+                java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                int[] ports = {5181, 5180};
+                for (int port : ports) {
+                    try {
+                        java.net.http.HttpRequest httpReq = java.net.http.HttpRequest.newBuilder()
+                            .uri(java.net.URI.create("http://localhost:" + port + "/api/bringups"))
+                            .header("Content-Type", "application/json")
+                            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload))
+                            .timeout(java.time.Duration.ofMillis(1500))
+                            .build();
+                        java.net.http.HttpResponse<String> resp = client.send(httpReq, java.net.http.HttpResponse.BodyHandlers.ofString());
+                        if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                            System.out.println("[SYNC INCOMING MAIL] Scheduled bring-up for " + id + " sent to port " + port);
+                            break;
+                        }
+                    } catch (Exception ignored) {}
+                }
+            } catch (Exception e) {
+                System.err.println("[SYNC NOTICE] Could not forward scheduled bring-up to Incoming-Mail: " + e.getMessage());
+            }
+        }).start();
+
         return ResponseEntity.ok(Map.of("success", true));
     }
 

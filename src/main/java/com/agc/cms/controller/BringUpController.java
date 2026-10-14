@@ -107,6 +107,7 @@ public class BringUpController {
 
         jdbcTemplate.update("UPDATE bringup SET collected = 1 WHERE bringupID = ?", bringupID);
         System.out.println("[FILE COLLECTED] BringUp ID #" + bringupID + " checked out by " + user.getUsername());
+        forwardStatusToIncomingMail(bringupID, "In Transit", "Checked out / in transit via CMS", user.getUsername());
         return ResponseEntity.ok(Map.of("success", true));
     }
 
@@ -119,6 +120,7 @@ public class BringUpController {
 
         jdbcTemplate.update("UPDATE bringup SET recieved = 1, recieptDate = CURDATE() WHERE bringupID = ?", bringupID);
         System.out.println("[FILE RECEIVED] BringUp ID #" + bringupID + " received by " + user.getUsername());
+        forwardStatusToIncomingMail(bringupID, "With Counsel", "Received by counsel via CMS", user.getUsername());
         return ResponseEntity.ok(Map.of("success", true));
     }
 
@@ -131,6 +133,40 @@ public class BringUpController {
 
         jdbcTemplate.update("UPDATE bringup SET broughtBack = 1 WHERE bringupID = ?", bringupID);
         System.out.println("[FILE RETURNED] BringUp ID #" + bringupID + " returned by " + user.getUsername());
+        forwardStatusToIncomingMail(bringupID, "Returned to Vault", "Returned to archival vault via CMS", user.getUsername());
         return ResponseEntity.ok(Map.of("success", true));
+    }
+
+    private void forwardStatusToIncomingMail(int bringupID, String status, String note, String username) {
+        new Thread(() -> {
+            try {
+                String jsonPayload = String.format(
+                    "{\"status\":\"%s\",\"handler_name\":\"%s\",\"notes\":\"%s\"}",
+                    status,
+                    username != null ? username : "CMS Officer",
+                    note
+                );
+
+                java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                int[] ports = {5181, 5180};
+                for (int port : ports) {
+                    try {
+                        java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                            .uri(java.net.URI.create("http://localhost:" + port + "/api/bringups/" + bringupID + "/status"))
+                            .header("Content-Type", "application/json")
+                            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonPayload))
+                            .timeout(java.time.Duration.ofMillis(1500))
+                            .build();
+                        java.net.http.HttpResponse<String> resp = client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+                        if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                            System.out.println("[SYNC INCOMING MAIL] BringUp #" + bringupID + " status '" + status + "' communicated on port " + port);
+                            break;
+                        }
+                    } catch (Exception ignored) {}
+                }
+            } catch (Exception e) {
+                System.err.println("[SYNC NOTICE] Could not forward bring-up status to Incoming-Mail: " + e.getMessage());
+            }
+        }).start();
     }
 }
