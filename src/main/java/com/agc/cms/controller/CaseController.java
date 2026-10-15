@@ -578,6 +578,46 @@ public class CaseController {
         if (counselID != null) {
             String msg = "A case matter #" + rawID + " has been allocated to you for representation.";
             jdbcTemplate.update("INSERT INTO notifications (user_id, message, case_id) VALUES (?, ?, ?)", counselID, msg, id);
+
+            // Direct sync to Incoming Mail database
+            try {
+                String counselName = "State Counsel";
+                List<Map<String, Object>> offRows = jdbcTemplate.queryForList("""
+                    SELECT CONCAT(COALESCE(p.firstName, ''), ' ', COALESCE(p.surname, '')) as fullName, o.username
+                    FROM officer o LEFT JOIN person p ON o.officerID = p.personID WHERE o.officerID = ?
+                """, counselID);
+                if (!offRows.isEmpty()) {
+                    String fn = (String) offRows.get(0).get("fullName");
+                    counselName = (fn != null && !fn.trim().isEmpty()) ? fn.trim() : (String) offRows.get(0).get("username");
+                }
+
+                String targetTable = "claim";
+                String idCol = "claimID";
+                if ("garnishee".equalsIgnoreCase(caseType)) { targetTable = "garnishee"; idCol = "garnisheeID"; }
+                else if ("defence".equalsIgnoreCase(caseType)) { targetTable = "defence"; idCol = "defenceID"; }
+                else if ("arbitration".equalsIgnoreCase(caseType)) { targetTable = "arbitration"; idCol = "arbitrationID"; }
+
+                List<Map<String, Object>> caseRows = jdbcTemplate.queryForList("SELECT fileNumber FROM " + targetTable + " WHERE " + idCol + " = ?", rawID);
+                if (!caseRows.isEmpty()) {
+                    String fileNumber = (String) caseRows.get(0).get("fileNumber");
+                    if (fileNumber != null && !fileNumber.trim().isEmpty()) {
+                        jdbcTemplate.update("""
+                            UPDATE incoming_mail_db.incoming_mail
+                            SET action_officer = ?, date_marked = CURDATE(), cms_synced = 1
+                            WHERE LOWER(TRIM(reference_no)) = LOWER(TRIM(?))
+                        """, counselName, fileNumber);
+
+                        jdbcTemplate.update("""
+                            INSERT INTO incoming_mail_db.case_history (record_id, action_type, field_name, old_value, new_value, description, changed_by, created_at, updated_at)
+                            SELECT id, 'SYSTEM_AUTO', 'action_officer', action_officer, ?, CONCAT('Allocated in Civil Litigation CMS to State Counsel ', ?), 'Registry Records (CMS)', NOW(), NOW()
+                            FROM incoming_mail_db.incoming_mail
+                            WHERE LOWER(TRIM(reference_no)) = LOWER(TRIM(?))
+                        """, counselName, counselName, fileNumber);
+                    }
+                }
+            } catch (Exception syncEx) {
+                System.err.println("Incoming-Mail sync notice on allocation: " + syncEx.getMessage());
+            }
         }
 
         return ResponseEntity.ok(Map.of("success", true));
@@ -636,34 +676,35 @@ public class CaseController {
             rawID, dbType, user.getOfficerID(), bringUpDate
         );
 
-        // Forward bring-up to Incoming-Mail Register
-        new Thread(() -> {
-            try {
-                String payload = String.format(
-                    "{\"reference_no\":\"%s\",\"case_title\":\"Docket #%s\",\"case_type\":\"%s\",\"bring_up_date\":\"%s\",\"officer_name\":\"%s\",\"action_reason\":\"Court Proceeding / Hearing Bring-Up (CMS)\",\"priority\":\"Normal\",\"status\":\"Pending Pick-up\",\"notes\":\"Scheduled from CMS by %s\"}",
-                    id, id, caseType.toUpperCase(), bringUpDate, user.getUsername(), user.getUsername()
-                );
-                java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
-                int[] ports = {5181, 5180};
-                for (int port : ports) {
-                    try {
-                        java.net.http.HttpRequest httpReq = java.net.http.HttpRequest.newBuilder()
-                            .uri(java.net.URI.create("http://localhost:" + port + "/api/bringups"))
-                            .header("Content-Type", "application/json")
-                            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload))
-                            .timeout(java.time.Duration.ofMillis(1500))
-                            .build();
-                        java.net.http.HttpResponse<String> resp = client.send(httpReq, java.net.http.HttpResponse.BodyHandlers.ofString());
-                        if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
-                            System.out.println("[SYNC INCOMING MAIL] Scheduled bring-up for " + id + " sent to port " + port);
-                            break;
-                        }
-                    } catch (Exception ignored) {}
+        // Sync bring-up date to Incoming-Mail database
+        try {
+            String targetTable = "claim";
+            String idCol = "claimID";
+            if ("garnishee".equalsIgnoreCase(caseType)) { targetTable = "garnishee"; idCol = "garnisheeID"; }
+            else if ("defence".equalsIgnoreCase(caseType)) { targetTable = "defence"; idCol = "defenceID"; }
+            else if ("arbitration".equalsIgnoreCase(caseType)) { targetTable = "arbitration"; idCol = "arbitrationID"; }
+
+            List<Map<String, Object>> caseRows = jdbcTemplate.queryForList("SELECT fileNumber FROM " + targetTable + " WHERE " + idCol + " = ?", rawID);
+            if (!caseRows.isEmpty()) {
+                String fileNumber = (String) caseRows.get(0).get("fileNumber");
+                if (fileNumber != null && !fileNumber.trim().isEmpty()) {
+                    String counselName = user.getFullName() != null && !user.getFullName().trim().isEmpty() ? user.getFullName() : user.getUsername();
+                    jdbcTemplate.update("""
+                        UPDATE incoming_mail_db.incoming_mail
+                        SET bring_up_date = ?, brought_up_confirmed = 0, bring_up_notes = ?
+                        WHERE LOWER(TRIM(reference_no)) = LOWER(TRIM(?))
+                    """, bringUpDate, "Requested by " + counselName + " in CMS", fileNumber);
+
+                    jdbcTemplate.update("""
+                        INSERT INTO incoming_mail_db.bringups (reference_no, bring_up_date, officer_name, action_reason, status, created_at, updated_at)
+                        VALUES (?, ?, ?, 'Docket Requested in CMS', 'Pending Delivery', NOW(), NOW())
+                        ON DUPLICATE KEY UPDATE bring_up_date = VALUES(bring_up_date), officer_name = VALUES(officer_name), status = 'Pending Delivery', updated_at = NOW()
+                    """, fileNumber, bringUpDate, counselName);
                 }
-            } catch (Exception e) {
-                System.err.println("[SYNC NOTICE] Could not forward scheduled bring-up to Incoming-Mail: " + e.getMessage());
             }
-        }).start();
+        } catch (Exception ex) {
+            System.err.println("Notice: bringup sync to incoming_mail_db: " + ex.getMessage());
+        }
 
         return ResponseEntity.ok(Map.of("success", true));
     }
@@ -846,29 +887,13 @@ public class CaseController {
     }
 
     @PostMapping("/{id}/documents")
-    public ResponseEntity<?> uploadDocument(
-        @PathVariable String id,
-        @RequestParam(value = "file", required = false) MultipartFile singleFile,
-        @RequestParam(value = "files", required = false) MultipartFile[] multipleFiles,
-        HttpServletRequest httpRequest) {
+    public ResponseEntity<?> uploadDocument(@PathVariable String id, @RequestParam("file") MultipartFile file, HttpServletRequest httpRequest) {
         AuthenticatedUser user = getAuthUser(httpRequest);
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
         }
 
-        List<MultipartFile> filesToUpload = new ArrayList<>();
-        if (multipleFiles != null) {
-            for (MultipartFile f : multipleFiles) {
-                if (f != null && !f.isEmpty()) {
-                    filesToUpload.add(f);
-                }
-            }
-        }
-        if (singleFile != null && !singleFile.isEmpty() && !filesToUpload.contains(singleFile)) {
-            filesToUpload.add(singleFile);
-        }
-
-        if (filesToUpload.isEmpty()) {
+        if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "No file uploaded"));
         }
 
@@ -885,25 +910,15 @@ public class CaseController {
                 Files.createDirectories(uploadPath);
             }
 
-            List<Map<String, Object>> savedResults = new ArrayList<>();
+            String cleanName = SanitizerUtils.sanitizeFilename(file.getOriginalFilename());
+            String storedFilename = System.currentTimeMillis() + "-" + Math.round(Math.random() * 1E9) + "-" + cleanName;
+            Path targetLocation = uploadPath.resolve(storedFilename);
+            Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
 
-            for (MultipartFile file : filesToUpload) {
-                String cleanName = SanitizerUtils.sanitizeFilename(file.getOriginalFilename());
-                String storedFilename = System.currentTimeMillis() + "-" + Math.round(Math.random() * 1E9) + "-" + cleanName;
-                Path targetLocation = uploadPath.resolve(storedFilename);
-                Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
-
-                jdbcTemplate.update(
-                    "INSERT INTO documents (caseID, caseType, documentClass, name, size, type, uploadDate) VALUES (?, ?, 1, ?, ?, ?, NOW())",
-                    rawID, dbType, storedFilename, file.getSize(), file.getContentType()
-                );
-
-                savedResults.add(Map.of(
-                    "name", storedFilename,
-                    "size", file.getSize(),
-                    "type", file.getContentType() != null ? file.getContentType() : "application/pdf"
-                ));
-            }
+            jdbcTemplate.update(
+                "INSERT INTO documents (caseID, caseType, documentClass, name, size, type, uploadDate) VALUES (?, ?, 1, ?, ?, ?, NOW())",
+                rawID, dbType, storedFilename, file.getSize(), file.getContentType()
+            );
 
             try {
                 jdbcTemplate.update(
@@ -916,11 +931,9 @@ public class CaseController {
 
             return ResponseEntity.ok(Map.of(
                 "success", true,
-                "count", savedResults.size(),
-                "documents", savedResults,
-                "name", savedResults.get(0).get("name"),
-                "size", savedResults.get(0).get("size"),
-                "type", savedResults.get(0).get("type")
+                "name", storedFilename,
+                "size", file.getSize(),
+                "type", file.getContentType() != null ? file.getContentType() : "application/pdf"
             ));
         } catch (Exception e) {
             System.err.println("Error saving document: " + e.getMessage());
