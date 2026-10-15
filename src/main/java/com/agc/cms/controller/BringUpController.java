@@ -49,10 +49,15 @@ public class BringUpController {
     public ResponseEntity<?> getBringUps() {
         String query = """
             SELECT bu.bringupID, bu.caseID, bu.caseType, bu.bringUpDate, bu.collected, bu.recieved, bu.broughtBack, bu.recieptDate,
-                   o.username, p.firstName, p.surname
+                   o.username, p.firstName, p.surname,
+                   COALESCE(cl.fileNumber, g.fileNumber, d.fileNumber, a.fileNumber) as fileNumber
             FROM bringup bu
             LEFT JOIN officer o ON bu.officerID = o.officerID
             LEFT JOIN person p ON o.officerID = p.personID
+            LEFT JOIN claim cl ON bu.caseID = cl.claimID AND bu.caseType = 10
+            LEFT JOIN garnishee g ON bu.caseID = g.garnisheeID AND bu.caseType = 9
+            LEFT JOIN defence d ON bu.caseID = d.defenceID AND bu.caseType IN (11, 12)
+            LEFT JOIN arbitration a ON bu.caseID = a.arbitrationID AND bu.caseType = 13
             ORDER BY bu.bringUpDate DESC
         """;
 
@@ -76,6 +81,7 @@ public class BringUpController {
             String fName = (String) r.get("firstName");
             String sName = (String) r.get("surname");
             String username = (String) r.get("username");
+            String fileNumber = (String) r.get("fileNumber");
 
             String officerName = (fName != null ? fName : "") + " " + (sName != null ? sName : "");
             officerName = officerName.trim().isEmpty() ? (username != null ? username : "Unknown") : officerName.trim();
@@ -85,6 +91,7 @@ public class BringUpController {
             map.put("caseID", caseID);
             map.put("caseType", caseTypeName);
             map.put("caseKey", caseTypeName.toLowerCase() + "-" + caseID);
+            map.put("fileNumber", fileNumber != null ? fileNumber : "");
             map.put("bringUpDate", r.get("bringUpDate"));
             map.put("collected", toBoolean(r.get("collected")));
             map.put("recieved", toBoolean(r.get("recieved")));
