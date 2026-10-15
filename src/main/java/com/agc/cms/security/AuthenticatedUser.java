@@ -8,8 +8,9 @@ public class AuthenticatedUser {
     private final int userType;
     private final boolean isSupervisor;
     private final Integer supervisorID;
+    private final String fullName;
 
-    public AuthenticatedUser(int officerID, String username, String email, String role, int userType, boolean isSupervisor, Integer supervisorID) {
+    public AuthenticatedUser(int officerID, String username, String email, String role, int userType, boolean isSupervisor, Integer supervisorID, String fullName) {
         this.officerID = officerID;
         this.username = username;
         this.email = email;
@@ -17,10 +18,15 @@ public class AuthenticatedUser {
         this.userType = userType;
         this.isSupervisor = isSupervisor;
         this.supervisorID = supervisorID;
+        this.fullName = fullName;
+    }
+
+    public AuthenticatedUser(int officerID, String username, String email, String role, int userType, boolean isSupervisor, Integer supervisorID) {
+        this(officerID, username, email, role, userType, isSupervisor, supervisorID, null);
     }
 
     public AuthenticatedUser(int officerID, String username, String email, String role, int userType) {
-        this(officerID, username, email, role, userType, false, null);
+        this(officerID, username, email, role, userType, false, null, null);
     }
 
     public int getOfficerID() {
@@ -29,6 +35,10 @@ public class AuthenticatedUser {
 
     public String getUsername() {
         return username;
+    }
+
+    public String getFullName() {
+        return (fullName != null && !fullName.trim().isEmpty()) ? fullName : username;
     }
 
     public String getEmail() {

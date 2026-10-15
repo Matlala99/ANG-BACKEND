@@ -202,8 +202,8 @@ public class AuthController {
         String role = getRoleLabel(userType);
         String resolvedEmail = (email != null && !email.trim().isEmpty()) ? email : username + "@gov.bw";
 
-        // 6. Generate Signed JWT Token with supervisor context
-        String token = jwtTokenProvider.generateToken(officerID, username, resolvedEmail, role, userType, isSupervisor, supervisorID);
+        // 6. Generate Signed JWT Token with supervisor and fullName context
+        String token = jwtTokenProvider.generateToken(officerID, username, resolvedEmail, role, userType, isSupervisor, supervisorID, fullName);
 
         // 7. Update last_login timestamp
         jdbcTemplate.update("UPDATE officer SET last_login = NOW(), active = 1 WHERE officerID = ?", officerID);
